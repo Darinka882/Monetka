@@ -5,20 +5,24 @@ from aiogram.types import Message, BotCommand
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 import asyncio
+import os
 from aiogram.client.default import DefaultBotProperties
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # Настройки бота
-TOKEN = "7584649281:AAFa5ydURl_MLA6zNO-Q4ObH_vG3FXJDcsk"
-SPREADSHEET_ID = "1EhlhX89B36F4cdTORWKkLteH-IFQncinlhFGYnepQQw"
+TOKEN = os.getenv("7584649281:AAFa5ydURl_MLA6zNO-Q4ObH_vG3FXJDcsk)
+SPREADSHEET_ID = os.getenv("1EhlhX89B36F4cdTORWKkLteH-IFQncinlhFGYnepQQw")
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
 # Подключение к Google Таблице
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+import json
+creds_json = os.getenv("GOOGLE_CREDS")
+creds_dict = json.loads(creds_json)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
