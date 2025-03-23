@@ -1,3 +1,6 @@
 aiogram==3.4.1
 gspread
 oauth2client
+uvloop
+aiohttp
+gunicorn
