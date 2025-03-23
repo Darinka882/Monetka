@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from aiohttp import web
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
 # Переменные окружения
 TOKEN = os.getenv("TOKEN")
@@ -89,7 +89,7 @@ async def add_expense(message: Message):
         logging.error(e)
         await message.answer("Ошибка при записи")
 
-# AIOHTTP-приложение
+# aiohttp-приложение
 app = web.Application()
 dp.include_router(router)
 
@@ -97,7 +97,10 @@ async def on_startup(app: web.Application):
     await bot.delete_webhook(drop_pending_updates=True)
     await set_commands(bot)
 
-SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=f"/{WEBHOOK_SECRET}")
-app.on_startup.append(on_startup)
+async def on_shutdown(app: web.Application):
+    await bot.session.close()
 
-# Для gunicorn (в start.sh): `bot:app`
+SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=f"/webhook/{WEBHOOK_SECRET}")
+
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
