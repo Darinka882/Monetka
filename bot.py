@@ -100,7 +100,13 @@ async def on_startup(app: web.Application):
 async def on_shutdown(app: web.Application):
     await bot.session.close()
 
-SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=f"/webhook/{WEBHOOK_SECRET}")
+SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
+    app, path=f"/webhook/{WEBHOOK_SECRET}"
+)
 
 app.on_startup.append(on_startup)
 app.on_shutdown.append(on_shutdown)
+
+# 🧠 ВОТ ЭТА СТРОКА ВАЖНА ДЛЯ РАБОТЫ НА RENDER
+if __name__ == "__main__":
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
