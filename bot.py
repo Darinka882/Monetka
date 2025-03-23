@@ -107,7 +107,34 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await set_commands(bot)  # Устанавливаем командное меню
     dp.include_router(router)
-    await dp.start_polling(bot)
+    from aiogram.webhook.aiohttp_server import setup_application
+from aiohttp import web
+import ssl
+import os
+
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_SECRET = "supersecret"  # можно любое слово, но держи в секрете
+BASE_WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "https://monetka.onrender.com") + WEBHOOK_PATH
+
+async def on_startup(app):
+    await set_commands(bot)
+    await bot.set_webhook(url=BASE_WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+
+async def main():
+    app = web.Application()
+    app["bot"] = bot
+    app["dp"] = dp
+    dp.include_router(router)
+
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    setup_application(app, dp, bot, secret_token=WEBHOOK_SECRET)
+
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
 if __name__ == "__main__":
     asyncio.run(main())
