@@ -35,6 +35,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
+dp.include_router(router)
 
 # Команды
 async def set_commands(bot: Bot):
@@ -91,22 +92,16 @@ async def add_expense(message: Message):
 
 # aiohttp-приложение
 app = web.Application()
-dp.include_router(router)
 
-async def on_startup(app: web.Application):
-    await bot.delete_webhook(drop_pending_updates=True)
-    await set_commands(bot)
-
-async def on_shutdown(app: web.Application):
-    await bot.session.close()
-
+# Регистрируем хендлер вебхука с секретом
 SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
     app, path=f"/webhook/{WEBHOOK_SECRET}"
 )
 
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
+app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
+app.on_startup.append(lambda app: set_commands(bot))
+app.on_shutdown.append(lambda app: bot.session.close())
 
-# 🧠 ВОТ ЭТА СТРОКА ВАЖНА ДЛЯ РАБОТЫ НА RENDER
+# 🧠 ВАЖНО ДЛЯ RENDER
 if __name__ == "__main__":
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
