@@ -1,38 +1,40 @@
 import logging
 import gspread
-from aiogram import Bot, Dispatcher, Router
-from aiogram.types import Message, BotCommand
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
 import asyncio
 import os
+import json
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.enums import ParseMode
+from aiogram.types import Message, BotCommand
+from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from aiohttp import web
 
-# Настройки бота
+# Настройки
 TOKEN = os.getenv("TOKEN")
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+BASE_WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook/{WEBHOOK_SECRET}"
 
-# Настройка логирования
+# Логирование
 logging.basicConfig(level=logging.INFO)
 
-# Подключение к Google Таблице
+# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-import json
 creds_json = os.getenv("GOOGLE_CREDS")
 creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-# Инициализация бота
+# Bot init
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 
 async def set_commands(bot: Bot):
-    """Устанавливает командное меню в Telegram"""
     commands = [
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="total", description="Посмотреть расходы за день"),
@@ -46,95 +48,55 @@ async def start(message: Message):
 
 @router.message(Command("total"))
 async def get_total(message: Message):
-    """Подсчет трат за сегодня и запись итога в таблицу"""
     try:
         today = datetime.now().strftime("%Y-%m-%d")
-        records = sheet.get_all_values()  # Получаем все строки
-        header = records[0]  # Заголовки столбцов
-
-        # Проверяем наличие нужных столбцов
+        records = sheet.get_all_values()
+        header = records[0]
         if "Дата" not in header or "Сумма" not in header:
-            await message.answer("Ошибка: в таблице нет колонок 'Дата' или 'Сумма'.")
+            await message.answer("Ошибка: нет колонок 'Дата' или 'Сумма'.")
             return
-        
         date_col = header.index("Дата") + 1
         amount_col = header.index("Сумма") + 1
         total_col = header.index("Итог") + 1 if "Итог" in header else None
-
         total = sum(int(row[amount_col - 1]) for row in records[1:] if row[date_col - 1] == today)
-
-        # Записываем итог в таблицу
         if total_col:
-            sheet.update_cell(len(records) + 1, total_col, total)  # Записываем в первую свободную строку
-
+            sheet.update_cell(len(records) + 1, total_col, total)
         await message.answer(f"💰 Итог за {today}: {total} руб.")
     except Exception as e:
-        await message.answer("Ошибка при подсчете суммы.")
+        await message.answer("Ошибка при подсчете.")
         logging.error(e)
 
 @router.message(Command("debug"))
 async def debug(message: Message):
-    """Команда для проверки данных в таблице"""
     try:
-        records = sheet.get_all_values()  # Получаем все строки
+        records = sheet.get_all_values()
         if not records:
             await message.answer("Таблица пустая.")
             return
         await message.answer(f"🔍 Данные в таблице:\n{records}")
     except Exception as e:
-        await message.answer("Ошибка при чтении таблицы.")
+        await message.answer("Ошибка при чтении.")
         logging.error(e)
 
 @router.message()
 async def add_expense(message: Message):
-    """Добавление расхода в таблицу"""
     try:
         data = message.text.split(" ", 1)
-        amount = int(data[0])  # Сумма
-        category = data[1] if len(data) > 1 else "Прочее"  # Категория
-        date = datetime.now().strftime("%Y-%m-%d")  # Текущая дата
-
-        sheet.append_row([date, amount, category])  # Запись в Google Таблицу
+        amount = int(data[0])
+        category = data[1] if len(data) > 1 else "Прочее"
+        date = datetime.now().strftime("%Y-%m-%d")
+        sheet.append_row([date, amount, category])
         await message.answer(f"✅ Записано: {amount} руб. на {category} ({date})")
     except ValueError:
-        await message.answer("Ошибка! Отправь сообщение в формате: 500 Еда")
+        await message.answer("Формат: 500 Еда")
     except Exception as e:
-        await message.answer("Произошла ошибка при записи.")
+        await message.answer("Ошибка при записи.")
         logging.error(e)
 
-async def main():
-    """Основная функция запуска бота"""
-    await bot.delete_webhook(drop_pending_updates=True)
-    await set_commands(bot)  # Устанавливаем командное меню
-    dp.include_router(router)
-    from aiogram.webhook.aiohttp_server import setup_application
-from aiohttp import web
-import ssl
-import os
+dp.include_router(router)
 
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_SECRET = "supersecret"  # можно любое слово, но держи в секрете
-BASE_WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "https://monetka.onrender.com") + WEBHOOK_PATH
-
-async def on_startup(app):
-    await set_commands(bot)
-    await bot.set_webhook(url=BASE_WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-
-async def main():
-    app = web.Application()
-    app["bot"] = bot
-    app["dp"] = dp
-    dp.include_router(router)
-
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    setup_application(app, dp, bot, secret_token=WEBHOOK_SECRET)
-
-    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# aiohttp-приложение для вебхука
+app = web.Application()
+dp.startup.register(set_commands)
+dp.startup.register(lambda _: bot.set_webhook(BASE_WEBHOOK_URL, secret_token=WEBHOOK_SECRET))
+app.router.add_route("*", f"/webhook/{WEBHOOK_SECRET}", dp.webhook_request_handler())
