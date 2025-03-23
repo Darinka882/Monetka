@@ -11,8 +11,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # Настройки бота
-TOKEN = os.getenv("7584649281:AAFa5ydURl_MLA6zNO-Q4ObH_vG3FXJDcsk)
-SPREADSHEET_ID = os.getenv("1EhlhX89B36F4cdTORWKkLteH-IFQncinlhFGYnepQQw")
+TOKEN = os.getenv("TOKEN")
+SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
