@@ -14,7 +14,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from aiohttp import web
 from aiohttp.web_request import Request
-from aiohttp import web
+from aiohttp.web_response import Response
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
 class CustomRequestHandler(SimpleRequestHandler):
@@ -107,14 +107,21 @@ async def add_expense(message: Message):
 # aiohttp-приложение
 app = web.Application()
 
+# Обработка ping-запросов от Render
+async def ping_handler(request: Request) -> Response:
+    return web.Response(text="pong")
+
+app.router.add_get("/", ping_handler)
+
 # Регистрируем хендлер вебхука с секретом
 CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
     app, path=f"/webhook/{WEBHOOK_SECRET}"
 )
+
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
 
-# 🧠 ВАЖНО ДЛЯ RENDER
+# 🦠 ВАЖНО ДЛЯ RENDER
 if __name__ == "__main__":
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
