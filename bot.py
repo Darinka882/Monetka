@@ -21,7 +21,9 @@ class CustomRequestHandler(SimpleRequestHandler):
     async def _handle_update(self, request: Request):
         try:
             data = await request.json()
+            logging.info(f"\ud83d\udd0d Получен апдейт: {data}")
         except Exception:
+            logging.error("\u274c Не удалось распарсить JSON")
             return web.Response(status=400, text="Invalid JSON")
 
         if data.get("ping"):
@@ -82,12 +84,12 @@ async def get_total(message: Message):
     if total_col:
         sheet.update_cell(len(records) + 1, total_col, total)
 
-    await message.answer(f"💰 Итог за {today}: {total} руб.")
+    await message.answer(f"\ud83d\udcb0 Итог за {today}: {total} руб.")
 
 @router.message(Command("debug"))
 async def debug(message: Message):
     records = sheet.get_all_values()
-    await message.answer(f"🔍 Данные в таблице:\n{records if records else 'пусто'}")
+    await message.answer(f"\ud83d\udd0d Данные в таблице:\n{records if records else 'пусто'}")
 
 @router.message()
 async def add_expense(message: Message):
@@ -97,7 +99,7 @@ async def add_expense(message: Message):
         category = data[1] if len(data) > 1 else "Прочее"
         date = datetime.now().strftime("%Y-%m-%d")
         sheet.append_row([date, amount, category])
-        await message.answer(f"✅ Записано: {amount} руб. на {category} ({date})")
+        await message.answer(f"\u2705 Записано: {amount} руб. на {category} ({date})")
     except ValueError:
         await message.answer("Ошибка! Отправь в формате: 500 Еда")
     except Exception as e:
