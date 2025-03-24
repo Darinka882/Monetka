@@ -14,44 +14,45 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from aiohttp import web
 from aiohttp.web_request import Request
-from aiohttp.web_response import Response
+from aiohttp.web_response import json_response
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler  # ⬅️ ВАЖНО
 
-# 🚫 Заменяем SimpleRequestHandler на ручной хендлер
-async def telegram_webhook(request: Request) -> Response:
-    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != os.getenv("WEBHOOK_SECRET"):
-        return web.Response(status=401, text="Unauthorized")
+# 👇 Кастомный хендлер для пинга от Render
+class CustomRequestHandler(SimpleRequestHandler):
+    async def _handle_update(self, request: Request):
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
 
-    try:
-        data = await request.json()
-    except Exception:
-        return web.Response(status=400, text="Invalid JSON")
+        if data.get("ping") == "true":
+            return json_response({"status": "ok", "message": "pong"})
 
-    await dp.feed_webhook_update(bot, data, request.headers)
-    return web.Response()
+        return await super()._handle_update(request)
 
-# Переменные окружения
+# 🔐 Переменные окружения
 TOKEN = os.getenv("TOKEN")
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
 
-# Подключение к Google Таблице
+# 📄 Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(GOOGLE_CREDS)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-# Логирование
+# 📋 Логирование
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
+# 🤖 Инициализация бота
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# Команды
+# ✅ Команды
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -60,7 +61,7 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# Хендлеры
+# 📥 Хендлеры
 @router.message(Command("start"))
 async def start(message: Message):
     await message.answer("Привет! Отправь сумму и категорию расхода. Например: 500 Еда")
@@ -104,15 +105,20 @@ async def add_expense(message: Message):
         logging.error(e)
         await message.answer("Ошибка при записи")
 
-# Приложение aiohttp
+# 🌍 aiohttp-приложение
 app = web.Application()
-app.router.add_post(f"/webhook/{WEBHOOK_SECRET}", telegram_webhook)
-app.router.add_get("/", lambda r: web.Response(text="pong"))
+app.router.add_get("/", lambda r: web.Response(text="pong"))  # Для ping от Render
 
-# Запуск
+# ⛓️ Привязываем aiogram webhook к маршруту
+CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
+    app, path=f"/webhook/{WEBHOOK_SECRET}"
+)
+
+# 🔄 Жизненный цикл
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
 
+# 🚀 Запуск
 if __name__ == "__main__":
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
