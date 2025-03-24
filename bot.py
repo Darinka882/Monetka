@@ -17,7 +17,7 @@ from aiohttp.web_request import Request
 from aiohttp.web_response import json_response
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-# Кастомный RequestHandler, обрабатывающий ping
+# === Обработчик ping от Render ===
 class CustomRequestHandler(SimpleRequestHandler):
     async def _handle_update(self, request: Request):
         try:
@@ -30,29 +30,29 @@ class CustomRequestHandler(SimpleRequestHandler):
 
         return await super()._handle_update(request)
 
-# Переменные окружения
+# === Переменные окружения ===
 TOKEN = os.getenv("TOKEN")
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
 
-# Подключение к Google Таблице
+# === Подключение к Google Sheets ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(GOOGLE_CREDS)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-# Логирование
+# === Логирование ===
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
+# === Инициализация бота ===
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# Команды
+# === Установка команд ===
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -61,7 +61,7 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# Хендлеры
+# === Хендлеры ===
 @router.message(Command("start"))
 async def start(message: Message):
     await message.answer("Привет! Отправь сумму и категорию расхода. Например: 500 Еда")
@@ -105,14 +105,14 @@ async def add_expense(message: Message):
         logging.error(e)
         await message.answer("Ошибка при записи")
 
-# Приложение aiohttp
+# === Приложение aiohttp ===
 app = web.Application()
 CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
     app, path=f"/webhook/{WEBHOOK_SECRET}"
 )
+
 app.router.add_get("/", lambda r: web.Response(text="pong"))
 
-# Запуск
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
