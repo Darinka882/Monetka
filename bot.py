@@ -13,7 +13,21 @@ from aiogram.client.default import DefaultBotProperties
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from aiohttp import web
+from aiohttp.web_request import Request
+from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+
+class CustomRequestHandler(SimpleRequestHandler):
+    async def _handle_update(self, request: Request):
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+
+        if data.get("ping"):
+            return web.Response(status=200, text="pong")
+
+        return await super()._handle_update(request)
 
 # Переменные окружения
 TOKEN = os.getenv("TOKEN")
@@ -94,10 +108,9 @@ async def add_expense(message: Message):
 app = web.Application()
 
 # Регистрируем хендлер вебхука с секретом
-SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
+CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
     app, path=f"/webhook/{WEBHOOK_SECRET}"
 )
-
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
