@@ -15,21 +15,19 @@ from datetime import datetime
 from aiohttp import web
 from aiohttp.web_request import Request
 from aiohttp.web_response import Response
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-class CustomRequestHandler(SimpleRequestHandler):
-    async def _handle_update(self, request: Request):
-        try:
-            data = await request.json()
-            logging.info(f"\ud83d\udd0d Получен апдейт: {data}")
-        except Exception:
-            logging.error("\u274c Не удалось распарсить JSON")
-            return web.Response(status=400, text="Invalid JSON")
+# 🚫 Заменяем SimpleRequestHandler на ручной хендлер
+async def telegram_webhook(request: Request) -> Response:
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != os.getenv("WEBHOOK_SECRET"):
+        return web.Response(status=401, text="Unauthorized")
 
-        if data.get("ping"):
-            return web.Response(status=200, text="pong")
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(status=400, text="Invalid JSON")
 
-        return await super()._handle_update(request)
+    await dp.feed_webhook_update(bot, data, request.headers)
+    return web.Response()
 
 # Переменные окружения
 TOKEN = os.getenv("TOKEN")
@@ -84,12 +82,12 @@ async def get_total(message: Message):
     if total_col:
         sheet.update_cell(len(records) + 1, total_col, total)
 
-    await message.answer(f"\ud83d\udcb0 Итог за {today}: {total} руб.")
+    await message.answer(f"💰 Итог за {today}: {total} руб.")
 
 @router.message(Command("debug"))
 async def debug(message: Message):
     records = sheet.get_all_values()
-    await message.answer(f"\ud83d\udd0d Данные в таблице:\n{records if records else 'пусто'}")
+    await message.answer(f"🔍 Данные в таблице:\n{records if records else 'пусто'}")
 
 @router.message()
 async def add_expense(message: Message):
@@ -99,31 +97,22 @@ async def add_expense(message: Message):
         category = data[1] if len(data) > 1 else "Прочее"
         date = datetime.now().strftime("%Y-%m-%d")
         sheet.append_row([date, amount, category])
-        await message.answer(f"\u2705 Записано: {amount} руб. на {category} ({date})")
+        await message.answer(f"✅ Записано: {amount} руб. на {category} ({date})")
     except ValueError:
         await message.answer("Ошибка! Отправь в формате: 500 Еда")
     except Exception as e:
         logging.error(e)
         await message.answer("Ошибка при записи")
 
-# aiohttp-приложение
+# Приложение aiohttp
 app = web.Application()
+app.router.add_post(f"/webhook/{WEBHOOK_SECRET}", telegram_webhook)
+app.router.add_get("/", lambda r: web.Response(text="pong"))
 
-# Обработка ping-запросов от Render
-async def ping_handler(request: Request) -> Response:
-    return web.Response(text="pong")
-
-app.router.add_get("/", ping_handler)
-
-# Регистрируем хендлер вебхука с секретом
-CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
-    app, path=f"/webhook/{WEBHOOK_SECRET}"
-)
-
+# Запуск
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
 
-# 🦠 ВАЖНО ДЛЯ RENDER
 if __name__ == "__main__":
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
