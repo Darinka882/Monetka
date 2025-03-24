@@ -2,56 +2,54 @@ import os
 import json
 import logging
 import gspread
-import asyncio
-
+from aiohttp import web
+from aiohttp.web_request import Request
 from aiogram import Bot, Dispatcher, Router
-from aiogram.types import Message, BotCommand
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import Message, BotCommand
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-from aiohttp import web
-from aiohttp.web_request import Request
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-# Кастомный RequestHandler для обработки ping-запросов
+# Custom handler for Render ping
 class CustomRequestHandler(SimpleRequestHandler):
-    async def _handle_update(self, request: Request):
+    async def _handle_update(self, request: Request) -> web.Response:
         try:
             data = await request.json()
         except Exception:
             return web.Response(status=400, text="Invalid JSON")
 
-        # 🧠 Обработка ping-запроса от Render
+        # Handle ping from Render
         if data.get("ping") == "true":
-            return web.json_response({"status": "ok", "message": "pong"})
+            return web.Response(text="pong")
 
         return await super()._handle_update(request)
 
-# Переменные окружения
+# Environment variables
 TOKEN = os.getenv("TOKEN")
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
 
-# Подключение к Google Таблице
+# Google Sheets connection
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(GOOGLE_CREDS)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-# Логирование
+# Logging
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
+# Bot setup
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# Команды
+# Commands
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -60,7 +58,7 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# Хендлеры
+# Handlers
 @router.message(Command("start"))
 async def start(message: Message):
     await message.answer("Привет! Отправь сумму и категорию расхода. Например: 500 Еда")
@@ -75,19 +73,13 @@ async def get_total(message: Message):
         return
     date_col = header.index("Дата") + 1
     amount_col = header.index("Сумма") + 1
-    total_col = header.index("Итог") + 1 if "Итог" in header else None
-
     total = sum(int(row[amount_col - 1]) for row in records[1:] if row[date_col - 1] == today)
-
-    if total_col:
-        sheet.update_cell(len(records) + 1, total_col, total)
-
-    await message.answer(f"\U0001F4B0 Итог за {today}: {total} руб.")
+    await message.answer(f"💰 Итог за {today}: {total} руб.")
 
 @router.message(Command("debug"))
 async def debug(message: Message):
     records = sheet.get_all_values()
-    await message.answer(f"\U0001F50D Данные в таблице:\n{records if records else 'пусто'}")
+    await message.answer(f"🔍 Данные в таблице:\n{records if records else 'пусто'}")
 
 @router.message()
 async def add_expense(message: Message):
@@ -97,20 +89,21 @@ async def add_expense(message: Message):
         category = data[1] if len(data) > 1 else "Прочее"
         date = datetime.now().strftime("%Y-%m-%d")
         sheet.append_row([date, amount, category])
-        await message.answer(f"\u2705 Записано: {amount} руб. на {category} ({date})")
+        await message.answer(f"✅ Записано: {amount} руб. на {category} ({date})")
     except ValueError:
         await message.answer("Ошибка! Отправь в формате: 500 Еда")
     except Exception as e:
         logging.error(e)
         await message.answer("Ошибка при записи")
 
-# Приложение aiohttp
+# AIOHTTP web app
 app = web.Application()
-
-# Регистрируем хендлер с секретом
 CustomRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
     app, path=f"/webhook/{WEBHOOK_SECRET}"
 )
+
+# Optional ping route for testing
+app.router.add_get("/", lambda r: web.Response(text="pong"))
 
 app.on_startup.append(lambda app: bot.delete_webhook(drop_pending_updates=True))
 app.on_startup.append(lambda app: set_commands(bot))
