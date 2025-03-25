@@ -2,40 +2,39 @@ import os
 import json
 import logging
 import gspread
-import asyncio
-
-from aiogram import Bot, Dispatcher, Router
-from aiogram.enums import ParseMode
-from aiogram.types import Message, BotCommand
-from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from aiohttp import web
+from aiogram import Bot, Dispatcher, Router
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import Message, BotCommand
+from aiogram.filters import Command
 
-# Переменные окружения
+# ================= НАСТРОЙКА =================
 TOKEN = os.getenv("TOKEN")
-GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+GOOGLE_CREDS = json.loads(os.getenv("GOOGLE_CREDS"))
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+PORT = int(os.getenv("PORT", 8080))
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-
-# Google Sheets
+# ================= GOOGLE SHEETS =================
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds_dict = json.loads(GOOGLE_CREDS)
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(GOOGLE_CREDS, scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1
+sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-# Инициализация бота
+# ================= ЛОГИ =================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ================= БОТ =================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# Установка команд
+# ================= КОМАНДЫ =================
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -44,7 +43,7 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# Хендлеры
+# ================= ХЕНДЛЕРЫ =================
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer("Привет! Отправь сумму и категорию расхода. Например: 500 Еда")
@@ -57,55 +56,53 @@ async def cmd_total(message: Message):
     if "Дата" not in header or "Сумма" not in header:
         await message.answer("Ошибка: нет колонок 'Дата' или 'Сумма'")
         return
-    date_col = header.index("Дата")
-    amount_col = header.index("Сумма")
-    total = sum(int(row[amount_col]) for row in records[1:] if row[date_col] == today)
-    await message.answer(f"\U0001F4B0 Итог за {today}: {total} руб.")
+    date_col = header.index("Дата") + 1
+    amount_col = header.index("Сумма") + 1
+    total = sum(int(row[amount_col - 1]) for row in records[1:] if row[date_col - 1] == today)
+    await message.answer(f"💰 Итог за {today}: {total} руб.")
 
 @router.message(Command("debug"))
 async def cmd_debug(message: Message):
     records = sheet.get_all_values()
-    await message.answer(f"\U0001F50D Данные в таблице:\n{records if records else 'пусто'}")
+    await message.answer(f"🔍 Данные в таблице:\n{records if records else 'пусто'}")
 
 @router.message()
 async def add_expense(message: Message):
     try:
-        data = message.text.split(" ", 1)
-        amount = int(data[0])
-        category = data[1] if len(data) > 1 else "Прочее"
+        amount, category = message.text.split(" ", 1)
+        amount = int(amount)
         date = datetime.now().strftime("%Y-%m-%d")
         sheet.append_row([date, amount, category])
-        await message.answer(f"\u2705 Записано: {amount} руб. на {category} ({date})")
+        await message.answer(f"✅ Записано: {amount} руб. на {category} ({date})")
     except ValueError:
         await message.answer("Ошибка! Отправь в формате: 500 Еда")
     except Exception as e:
-        logging.error(e)
+        logger.exception("Ошибка при записи")
         await message.answer("Ошибка при записи")
 
-# Обработчик вебхука
-async def telegram_webhook(request: web.Request) -> web.Response:
+# ================= ВЕБХУК =================
+async def telegram_webhook(request: web.Request):
     try:
         data = await request.json()
-    except Exception:
-        return web.Response(status=400, text="Invalid JSON")
+        logger.info(f"📥 Входящий апдейт: {data}")
 
-    # Обработка ping-запроса
-    if data.get("ping") == "true":
-        return web.json_response({"status": "ok", "message": "pong"})
+        if data.get("ping") == "true":
+            return web.json_response({"status": "ok", "message": "pong"})
 
-    # Обычное обновление
-    await dp.feed_raw_update(bot=bot, update=data, 
-                              update_type=data.get("update_type", "message"))
-    return web.Response(status=200)
+        await dp.feed_raw_update(bot=bot, update=data)
+        return web.Response(text="ok")
+    except Exception as e:
+        logger.exception("❌ Ошибка в webhook")
+        return web.Response(status=500, text="webhook error")
 
-# Aiohttp приложение
+# ================= СЕРВЕР =================
 app = web.Application()
 app.router.add_post(f"/webhook/{WEBHOOK_SECRET}", telegram_webhook)
-app.router.add_get("/", lambda request: web.Response(text="pong"))
+app.router.add_get("/", lambda r: web.Response(text="pong"))
 
 app.on_startup.append(lambda app: set_commands(bot))
 app.on_shutdown.append(lambda app: bot.session.close())
 
-# Запуск
+# ================= ЗАПУСК =================
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    web.run_app(app, host="0.0.0.0", port=PORT)
